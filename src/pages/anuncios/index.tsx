@@ -1,42 +1,27 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { apiClient, ApiClientError } from '@/api/client';
-import type { Anuncio, WhatsappDisparoResult } from '@/api/types';
+import type { Anuncio } from '@/api/types';
 import { useAuth } from '@/components/context/AuthContext';
 import { AppShell } from '@/components/layout/AppShell';
-import {
-  IconMegaphone,
-  IconPin,
-  IconPlus,
-  IconTrash,
-  IconWhatsApp,
-} from '@/components/ui/Icons';
-import {
-  EmptyState,
-  formatRelativeDate,
-  Modal,
-  WhatsAppShareModal,
-} from '@/components/ui/Primitives';
 
 export default function AnunciosPage() {
-  const { user, showToast } = useAuth();
+  const { user, turma, showToast } = useAuth();
   const [anuncios, setAnuncios] = useState<Anuncio[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
 
-  const [createOpen, setCreateOpen] = useState(false);
   const [titulo, setTitulo] = useState('');
   const [conteudo, setConteudo] = useState('');
   const [fixado, setFixado] = useState(false);
   const [submitting, setSubmitting] = useState(false);
 
-  const [waPreview, setWaPreview] = useState<WhatsappDisparoResult | null>(null);
+  const isDelegadoOrSub = user?.papel === 'delegado' || user?.papel === 'subdelegado';
 
-  const isGestor = user?.papel === 'delegado' || user?.papel === 'subdelegado';
-
-  const loadAnuncios = useCallback(async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await apiClient.anuncios.listar();
-      setAnuncios(data.anuncios);
+      const res = await apiClient.anuncios.listar();
+      setAnuncios(res.anuncios);
     } catch {
       // ignore
     } finally {
@@ -45,8 +30,8 @@ export default function AnunciosPage() {
   }, []);
 
   useEffect(() => {
-    void loadAnuncios();
-  }, [loadAnuncios]);
+    void load();
+  }, [load]);
 
   const handleCriar = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -56,177 +41,164 @@ export default function AnunciosPage() {
       setTitulo('');
       setConteudo('');
       setFixado(false);
-      setCreateOpen(false);
-      await loadAnuncios();
+      setShowForm(false);
+      await load();
       showToast('Anúncio publicado!', 'success');
     } catch (err) {
-      showToast(err instanceof ApiClientError ? err.message : 'Erro ao criar anúncio.', 'error');
+      showToast(err instanceof ApiClientError ? err.message : 'Erro ao publicar anúncio.', 'error');
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const handleDispararWhatsapp = async (id: string) => {
+    try {
+      const res = await apiClient.anuncios.dispararWhatsapp(id);
+      await load();
+      window.open(res.whatsapp.waMeUrl, '_blank', 'noopener,noreferrer');
+      showToast('Mensagem formatada pronta para o WhatsApp!', 'success');
+    } catch (err) {
+      showToast(err instanceof ApiClientError ? err.message : 'Erro ao preparar disparo.', 'error');
     }
   };
 
   const handleApagar = async (id: string) => {
     try {
       await apiClient.anuncios.apagar(id);
-      await loadAnuncios();
-      showToast('Anúncio removido.', 'success');
+      await load();
+      showToast('Anúncio removido.', 'info');
     } catch (err) {
-      showToast(err instanceof ApiClientError ? err.message : 'Erro ao apagar.', 'error');
-    }
-  };
-
-  const handleDispararWhatsapp = async (id: string) => {
-    try {
-      const res = await apiClient.anuncios.dispararWhatsapp(id, { dispararWebhook: true });
-      setWaPreview(res.whatsapp);
-      await loadAnuncios();
-    } catch (err) {
-      showToast(
-        err instanceof ApiClientError ? err.message : 'Erro ao preparar partilha WhatsApp.',
-        'error'
-      );
+      showToast(err instanceof ApiClientError ? err.message : 'Erro ao remover.', 'error');
     }
   };
 
   return (
     <AppShell title="Anúncios">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-h1">Anúncios da Turma</h1>
-          <p className="text-sm text-secondary mt-1" style={{ margin: '4px 0 0' }}>
-            Comunicados oficiais do delegado e disparo direto para o grupo do WhatsApp.
-          </p>
+      <div className="flex flex-col gap-space-lg">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm">
+          <div>
+            <h1 className="font-headline-lg-mobile md:font-headline-lg text-primary font-extrabold">
+              Anúncios &amp; Disparo WhatsApp
+            </h1>
+            <p className="font-body-md text-on-surface-variant">
+              Comunicados oficiais da turma {turma ? `(${turma.nome})` : ''} com envio formatado para o WhatsApp.
+            </p>
+          </div>
+          {isDelegadoOrSub && (
+            <button
+              type="button"
+              onClick={() => setShowForm((v) => !v)}
+              className="min-h-[44px] px-4 rounded-xl bg-primary text-on-primary font-label-md font-bold flex items-center gap-2 self-start shadow-sm"
+            >
+              <span className="material-symbols-outlined text-[20px]">{showForm ? 'close' : 'add'}</span>
+              <span>{showForm ? 'Cancelar' : 'Novo Anúncio'}</span>
+            </button>
+          )}
         </div>
 
-        {isGestor && (
-          <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
-            <IconPlus size={18} />
-            Novo Anúncio
-          </button>
-        )}
-      </div>
-
-      {loading ? (
-        <div className="card text-sm text-muted">A carregar anúncios...</div>
-      ) : anuncios.length === 0 ? (
-        <EmptyState
-          icon={<IconMegaphone size={24} />}
-          title="Ainda não há anúncios"
-          description="Os comunicados oficiais da turma vão aparecer aqui."
-          action={
-            isGestor ? (
-              <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
-                <IconPlus size={18} />
-                Criar Primeiro Anúncio
+        {showForm && isDelegadoOrSub && (
+          <form
+            onSubmit={handleCriar}
+            className="bg-surface-container-lowest rounded-2xl p-space-md lg:p-space-lg shadow-sm flex flex-col gap-space-sm"
+          >
+            <h2 className="font-headline-sm font-bold text-on-surface">Publicar Comunicado Oficial</h2>
+            <input
+              required
+              value={titulo}
+              onChange={(e) => setTitulo(e.target.value)}
+              placeholder="Título do anúncio"
+              className="w-full min-h-[44px] px-3.5 rounded-xl bg-surface-container-low focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+            <textarea
+              required
+              rows={4}
+              value={conteudo}
+              onChange={(e) => setConteudo(e.target.value)}
+              placeholder="Escreve os detalhes do comunicado para a turma..."
+              className="w-full p-3.5 rounded-xl bg-surface-container-low focus:outline-none focus:ring-2 focus:ring-primary"
+            />
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <label className="flex items-center gap-2 font-label-md cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={fixado}
+                  onChange={(e) => setFixado(e.target.checked)}
+                  className="w-4 h-4 accent-primary"
+                />
+                <span>Fixar no topo</span>
+              </label>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="min-h-[44px] px-5 rounded-xl bg-primary text-on-primary font-label-md font-bold"
+              >
+                {submitting ? 'A publicar...' : 'Publicar Anúncio'}
               </button>
-            ) : undefined
-          }
-        />
-      ) : (
-        <div className="flex flex-col gap-3">
-          {anuncios.map((a) => (
-            <article key={a.id} className="card flex flex-col gap-3">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2 flex-wrap">
-                  {a.fixado && (
-                    <span className="badge badge-primary">
-                      <IconPin size={12} /> Fixado
+            </div>
+          </form>
+        )}
+
+        {loading ? (
+          <div className="py-12 text-center text-on-surface-variant">A carregar anúncios...</div>
+        ) : anuncios.length === 0 ? (
+          <div className="bg-surface-container-lowest rounded-2xl p-space-xl text-center shadow-sm">
+            <span className="material-symbols-outlined text-[36px] text-secondary">campaign</span>
+            <p className="font-headline-sm font-bold mt-2">Nenhum anúncio publicado</p>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-space-md">
+            {anuncios.map((a) => (
+              <article
+                key={a.id}
+                className="bg-surface-container-lowest rounded-2xl p-space-md lg:p-space-lg shadow-sm flex flex-col gap-space-sm"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-full bg-primary-fixed text-on-primary-fixed-variant font-label-sm font-bold">
+                      Comunicado Oficial
                     </span>
-                  )}
-                  {a.disparadoWhatsapp && (
-                    <span className="badge badge-success">Enviado no WhatsApp</span>
-                  )}
-                  <span className="text-xs text-muted">
-                    {a.autorNome} · {formatRelativeDate(a.createdAt)}
+                    {a.fixado && (
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-secondary-container/40 text-on-secondary-container font-label-sm font-bold">
+                        <span className="material-symbols-outlined text-[14px]">push_pin</span>
+                        Fixado
+                      </span>
+                    )}
+                  </div>
+                  <span className="font-body-sm text-on-surface-variant">
+                    {new Date(a.createdAt).toLocaleDateString('pt-PT')} • {a.autorNome}
                   </span>
                 </div>
 
-                {isGestor && (
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    onClick={() => void handleApagar(a.id)}
-                    aria-label="Apagar anúncio"
-                  >
-                    <IconTrash size={16} />
-                  </button>
+                <h2 className="font-headline-md text-on-surface font-bold">{a.titulo}</h2>
+                <p className="font-body-md text-on-surface-variant whitespace-pre-line">{a.conteudo}</p>
+
+                {isDelegadoOrSub && (
+                  <div className="pt-space-sm border-t border-outline-variant/30 flex flex-wrap items-center justify-between gap-2">
+                    <button
+                      type="button"
+                      onClick={() => void handleDispararWhatsapp(a.id)}
+                      className="min-h-[42px] px-4 rounded-xl bg-secondary-container text-on-secondary-container hover:bg-secondary hover:text-on-secondary font-label-md font-bold transition-colors flex items-center gap-2"
+                    >
+                      <span className="material-symbols-outlined text-[18px]">send</span>
+                      <span>
+                        {a.disparadoWhatsapp ? 'Reenviar para WhatsApp' : 'Disparar para WhatsApp'}
+                      </span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => void handleApagar(a.id)}
+                      className="min-h-[40px] px-3 rounded-lg bg-error-container/60 text-on-error-container font-label-sm font-bold"
+                    >
+                      Apagar
+                    </button>
+                  </div>
                 )}
-              </div>
-
-              <div>
-                <h2 className="text-h3">{a.titulo}</h2>
-                <p
-                  className="text-sm text-secondary mt-1"
-                  style={{ margin: '6px 0 0', whiteSpace: 'pre-wrap' }}
-                >
-                  {a.conteudo}
-                </p>
-              </div>
-
-              {isGestor && (
-                <div className="flex items-center justify-end pt-1">
-                  <button
-                    type="button"
-                    className="btn btn-whatsapp btn-sm"
-                    onClick={() => void handleDispararWhatsapp(a.id)}
-                  >
-                    <IconWhatsApp size={18} />
-                    Disparar no WhatsApp
-                  </button>
-                </div>
-              )}
-            </article>
-          ))}
-        </div>
-      )}
-
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Novo Anúncio">
-        <form onSubmit={handleCriar} className="flex flex-col gap-3">
-          <label className="field">
-            <span className="field-label">Título</span>
-            <input
-              className="input"
-              type="text"
-              required
-              placeholder="Ex: Alteração de sala — Cálculo II"
-              value={titulo}
-              onChange={(e) => setTitulo(e.target.value)}
-            />
-          </label>
-          <label className="field">
-            <span className="field-label">Mensagem</span>
-            <textarea
-              className="textarea"
-              required
-              placeholder="Escreve os detalhes do comunicado..."
-              value={conteudo}
-              onChange={(e) => setConteudo(e.target.value)}
-            />
-          </label>
-          <label className="flex items-center gap-2 text-sm font-semibold" style={{ minHeight: 44 }}>
-            <input
-              type="checkbox"
-              checked={fixado}
-              onChange={(e) => setFixado(e.target.checked)}
-              style={{ width: 18, height: 18 }}
-            />
-            Fixar anúncio no topo
-          </label>
-          <button type="submit" className="btn btn-primary mt-1" disabled={submitting}>
-            {submitting ? 'A publicar...' : 'Publicar Anúncio'}
-          </button>
-        </form>
-      </Modal>
-
-      <WhatsAppShareModal
-        open={Boolean(waPreview)}
-        onClose={() => setWaPreview(null)}
-        title="Disparar Anúncio no WhatsApp"
-        textoFormatado={waPreview?.textoFormatado || ''}
-        waMeUrl={waPreview?.waMeUrl || '#'}
-        onCopySuccess={() => showToast('Anúncio copiado para colar no WhatsApp!', 'success')}
-      />
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
     </AppShell>
   );
 }

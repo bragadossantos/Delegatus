@@ -3,37 +3,27 @@ import { apiClient, ApiClientError } from '@/api/client';
 import type { GrupoTrabalho, ModoGrupo } from '@/api/types';
 import { useAuth } from '@/components/context/AuthContext';
 import { AppShell } from '@/components/layout/AppShell';
-import { IconLayers, IconPlus, IconTrash } from '@/components/ui/Icons';
-import { EmptyState, Modal } from '@/components/ui/Primitives';
-
-const MODO_LABEL: Record<ModoGrupo, string> = {
-  alfabetico: 'Alfabético',
-  aleatorio: 'Aleatório',
-  livre: 'Entrada Livre',
-};
 
 export default function GruposPage() {
   const { user, showToast } = useAuth();
   const [grupos, setGrupos] = useState<GrupoTrabalho[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
 
-  const [createOpen, setCreateOpen] = useState(false);
   const [modo, setModo] = useState<ModoGrupo>('livre');
-  const [disciplina, setDisciplina] = useState('');
-  const [temaBase, setTemaBase] = useState('');
-  const [tamanhoGrupo, setTamanhoGrupo] = useState(4);
   const [quantidadeGrupos, setQuantidadeGrupos] = useState(4);
   const [limiteVagas, setLimiteVagas] = useState(5);
   const [temasText, setTemasText] = useState('');
+  const [disciplina, setDisciplina] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const isGestor = user?.papel === 'delegado' || user?.papel === 'subdelegado';
+  const isDelegadoOrSub = user?.papel === 'delegado' || user?.papel === 'subdelegado';
 
-  const loadGrupos = useCallback(async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await apiClient.grupos.listar();
-      setGrupos(data.grupos);
+      const res = await apiClient.grupos.listar();
+      setGrupos(res.grupos);
     } catch {
       // ignore
     } finally {
@@ -42,38 +32,38 @@ export default function GruposPage() {
   }, []);
 
   useEffect(() => {
-    void loadGrupos();
-  }, [loadGrupos]);
+    void load();
+  }, [load]);
 
-  const handleCriar = async (e: React.FormEvent) => {
+  const handleCriarGrupos = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     try {
+      const temas = temasText
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean);
+
       if (modo === 'livre') {
-        const temas = temasText
-          .split('\n')
-          .map((t) => t.trim())
-          .filter(Boolean);
         await apiClient.grupos.criar({
           modo: 'livre',
-          disciplina: disciplina.trim() || undefined,
           quantidadeGrupos,
           limiteVagas,
-          temas: temas.length > 0 ? temas : undefined,
+          temas,
+          disciplina: disciplina || undefined,
         });
       } else {
         await apiClient.grupos.criar({
           modo,
-          disciplina: disciplina.trim() || undefined,
-          temaBase: temaBase.trim() || undefined,
-          tamanhoGrupo,
+          tamanhoGrupo: limiteVagas,
+          temaBase: temas[0] || undefined,
+          disciplina: disciplina || undefined,
         });
       }
-      setCreateOpen(false);
-      setDisciplina('');
-      setTemaBase('');
+
+      setShowCreate(false);
       setTemasText('');
-      await loadGrupos();
+      await load();
       showToast('Grupos de trabalho criados!', 'success');
     } catch (err) {
       showToast(err instanceof ApiClientError ? err.message : 'Erro ao criar grupos.', 'error');
@@ -85,7 +75,7 @@ export default function GruposPage() {
   const handleEntrar = async (id: string) => {
     try {
       await apiClient.grupos.entrar(id);
-      await loadGrupos();
+      await load();
       showToast('Entraste no grupo!', 'success');
     } catch (err) {
       showToast(err instanceof ApiClientError ? err.message : 'Não foi possível entrar.', 'error');
@@ -95,260 +85,217 @@ export default function GruposPage() {
   const handleSair = async (id: string) => {
     try {
       await apiClient.grupos.sair(id);
-      await loadGrupos();
-      showToast('Saíste do grupo.', 'success');
+      await load();
+      showToast('Saíste do grupo.', 'info');
     } catch (err) {
-      showToast(err instanceof ApiClientError ? err.message : 'Erro ao sair do grupo.', 'error');
+      showToast(err instanceof ApiClientError ? err.message : 'Erro ao sair.', 'error');
     }
   };
 
   const handleApagar = async (id: string) => {
     try {
       await apiClient.grupos.apagar(id);
-      await loadGrupos();
-      showToast('Grupo removido.', 'success');
+      await load();
+      showToast('Grupo removido.', 'info');
     } catch (err) {
-      showToast(err instanceof ApiClientError ? err.message : 'Erro ao remover grupo.', 'error');
+      showToast(err instanceof ApiClientError ? err.message : 'Erro ao remover.', 'error');
     }
   };
 
   return (
-    <AppShell title="Grupos de Trabalho">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-h1">Grupos de Trabalho</h1>
-          <p className="text-sm text-secondary mt-1" style={{ margin: '4px 0 0' }}>
-            Grupos automáticos (alfabético/aleatório) ou numerados com tema e limite de vagas.
-          </p>
+    <AppShell title="Grupos">
+      <div className="flex flex-col gap-space-lg">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm">
+          <div>
+            <h1 className="font-headline-lg-mobile md:font-headline-lg text-primary font-extrabold">
+              Grupos de Trabalho
+            </h1>
+            <p className="font-body-md text-on-surface-variant">
+              Organização por ordem alfabética, aleatória ou entrada livre com limite de vagas e tema.
+            </p>
+          </div>
+          {isDelegadoOrSub && (
+            <button
+              type="button"
+              onClick={() => setShowCreate((v) => !v)}
+              className="min-h-[44px] px-4 rounded-xl bg-primary text-on-primary font-label-md font-bold flex items-center gap-2 self-start"
+            >
+              <span className="material-symbols-outlined text-[20px]">{showCreate ? 'close' : 'group_add'}</span>
+              <span>{showCreate ? 'Cancelar' : 'Criar Grupos'}</span>
+            </button>
+          )}
         </div>
 
-        {isGestor && (
-          <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
-            <IconPlus size={18} />
-            Criar Grupos
-          </button>
+        {showCreate && isDelegadoOrSub && (
+          <form
+            onSubmit={handleCriarGrupos}
+            className="bg-surface-container-lowest rounded-2xl p-space-md lg:p-space-lg shadow-sm flex flex-col gap-space-sm"
+          >
+            <h2 className="font-headline-sm font-bold text-on-surface">Gerar Grupos de Trabalho</h2>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-space-sm">
+              <div className="flex flex-col gap-1">
+                <label className="font-label-sm font-bold text-on-surface-variant">Modo de Formação</label>
+                <select
+                  value={modo}
+                  onChange={(e) => setModo(e.target.value as ModoGrupo)}
+                  className="min-h-[44px] px-3 rounded-xl bg-surface-container-low"
+                >
+                  <option value="livre">Entrada Livre (com limite de vagas)</option>
+                  <option value="alfabetico">Ordem Alfabética Automática</option>
+                  <option value="aleatorio">Distribuição Aleatória Automática</option>
+                </select>
+              </div>
+              {modo === 'livre' && (
+                <div className="flex flex-col gap-1">
+                  <label className="font-label-sm font-bold text-on-surface-variant">Nº de Grupos</label>
+                  <input
+                    type="number"
+                    min={1}
+                    max={20}
+                    value={quantidadeGrupos}
+                    onChange={(e) => setQuantidadeGrupos(Number(e.target.value))}
+                    className="min-h-[44px] px-3 rounded-xl bg-surface-container-low"
+                  />
+                </div>
+              )}
+              <div className="flex flex-col gap-1">
+                <label className="font-label-sm font-bold text-on-surface-variant">Limite de Vagas / Grupo</label>
+                <input
+                  type="number"
+                  min={2}
+                  max={30}
+                  value={limiteVagas}
+                  onChange={(e) => setLimiteVagas(Number(e.target.value))}
+                  className="min-h-[44px] px-3 rounded-xl bg-surface-container-low"
+                />
+              </div>
+            </div>
+
+            <input
+              value={disciplina}
+              onChange={(e) => setDisciplina(e.target.value)}
+              placeholder="Disciplina (opcional, ex: Sistemas Operativos)"
+              className="min-h-[44px] px-3.5 rounded-xl bg-surface-container-low"
+            />
+            <textarea
+              rows={3}
+              value={temasText}
+              onChange={(e) => setTemasText(e.target.value)}
+              placeholder={
+                modo === 'livre'
+                  ? 'Temas (1 por linha, opcional — ex: Tema 1: Escalonamento)'
+                  : 'Tema base (opcional)'
+              }
+              className="p-3.5 rounded-xl bg-surface-container-low"
+            />
+            <button
+              type="submit"
+              disabled={submitting}
+              className="min-h-[44px] px-5 rounded-xl bg-primary text-on-primary font-label-md font-bold self-start"
+            >
+              {submitting ? 'A gerar...' : 'Gerar Grupos'}
+            </button>
+          </form>
         )}
-      </div>
 
-      {loading ? (
-        <div className="card text-sm text-muted">A carregar grupos...</div>
-      ) : grupos.length === 0 ? (
-        <EmptyState
-          icon={<IconLayers size={24} />}
-          title="Sem grupos criados"
-          description="O delegado pode gerar grupos por ordem alfabética, aleatória ou por vagas."
-          action={
-            isGestor ? (
-              <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
-                <IconPlus size={18} />
-                Criar Grupos
-              </button>
-            ) : undefined
-          }
-        />
-      ) : (
-        <div className="grid-cards">
-          {grupos.map((g) => {
-            const ocupados = g.membros.length;
-            const pct = g.limiteVagas > 0 ? Math.min(100, Math.round((ocupados / g.limiteVagas) * 100)) : 0;
-            const lotado = ocupados >= g.limiteVagas;
-            const estouDentro = Boolean(user && g.membros.some((m) => m.userId === user.id));
+        {loading ? (
+          <div className="py-10 text-center text-on-surface-variant">A carregar grupos...</div>
+        ) : grupos.length === 0 ? (
+          <div className="bg-surface-container-lowest rounded-2xl p-space-xl text-center shadow-sm">
+            <span className="material-symbols-outlined text-[36px] text-secondary">group_work</span>
+            <p className="font-headline-sm font-bold mt-2">Nenhum grupo criado ainda</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-space-md">
+            {grupos.map((g) => {
+              const count = g.membros.length;
+              const pct = Math.min(100, Math.round((count / g.limiteVagas) * 100));
+              const isFull = count >= g.limiteVagas;
+              const isMember = g.membros.some((m) => m.userId === user?.id);
 
-            const barColor =
-              pct >= 100
-                ? 'var(--status-danger-text)'
-                : pct >= 80
-                ? 'var(--status-warning-text)'
-                : 'var(--color-secondary)';
-
-            return (
-              <article key={g.id} className="card flex flex-col gap-3">
-                <div className="flex items-start justify-between gap-2">
+              return (
+                <div
+                  key={g.id}
+                  className="bg-surface-container-lowest rounded-2xl p-space-md shadow-sm flex flex-col justify-between gap-space-sm"
+                >
                   <div>
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <h2 className="text-h3">{g.nome}</h2>
-                      <span className="badge badge-info">{MODO_LABEL[g.modo]}</span>
-                    </div>
-                    {g.tema && (
-                      <div className="text-sm font-semibold mt-1" style={{ color: 'var(--color-primary)' }}>
-                        Tema: {g.tema}
-                      </div>
-                    )}
-                    {g.disciplina && (
-                      <div className="text-xs text-muted mt-1">{g.disciplina}</div>
-                    )}
-                  </div>
-
-                  {isGestor && (
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm"
-                      aria-label="Apagar grupo"
-                      onClick={() => void handleApagar(g.id)}
-                    >
-                      <IconTrash size={16} />
-                    </button>
-                  )}
-                </div>
-
-                {/* Vagas Progress Bar */}
-                <div>
-                  <div className="flex items-center justify-between text-xs font-semibold mb-2">
-                    <span className="text-secondary tabular-nums">
-                      {ocupados} de {g.limiteVagas} vagas preenchidas
-                    </span>
-                    <span className="font-mono" style={{ color: barColor }}>
-                      {lotado ? 'Lotado' : `${g.limiteVagas - ocupados} livres`}
-                    </span>
-                  </div>
-                  <div className="progress-track">
-                    <div
-                      className="progress-fill"
-                      style={{ width: `${pct}%`, backgroundColor: barColor }}
-                    />
-                  </div>
-                </div>
-
-                {/* Members */}
-                <div className="flex flex-wrap gap-1">
-                  {g.membros.length === 0 ? (
-                    <span className="text-xs text-muted">Ainda sem integrantes.</span>
-                  ) : (
-                    g.membros.map((m) => (
-                      <span key={m.userId} className="badge badge-neutral">
-                        {m.nome}
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="px-2.5 py-0.5 rounded-full bg-surface-container-high text-primary font-label-sm font-bold uppercase">
+                        {g.modo}
                       </span>
-                    ))
-                  )}
-                </div>
+                      <span
+                        className={`font-numeric-tabular text-xs font-bold ${
+                          isFull ? 'text-error' : 'text-secondary'
+                        }`}
+                      >
+                        {count}/{g.limiteVagas} vagas
+                      </span>
+                    </div>
 
-                {/* Join / Leave for livre mode */}
-                {g.modo === 'livre' && (
-                  <div className="mt-1">
-                    {estouDentro ? (
+                    <h3 className="font-headline-md text-on-surface font-bold mt-2">{g.nome}</h3>
+                    {g.tema && <p className="font-label-md text-secondary font-semibold">{g.tema}</p>}
+                    {g.disciplina && <p className="font-body-sm text-on-surface-variant">{g.disciplina}</p>}
+
+                    <div className="w-full h-2 rounded-full bg-surface-container-high overflow-hidden mt-3">
+                      <div
+                        className={`h-full rounded-full transition-all ${isFull ? 'bg-error' : 'bg-secondary'}`}
+                        style={{ width: `${pct}%` }}
+                      />
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap gap-1.5">
+                      {g.membros.length === 0 ? (
+                        <span className="font-body-sm text-outline">Sem integrantes ainda</span>
+                      ) : (
+                        g.membros.map((m) => (
+                          <span
+                            key={m.userId}
+                            className="px-2.5 py-1 rounded-lg bg-surface-container-low font-label-sm text-on-surface"
+                          >
+                            {m.nome}
+                          </span>
+                        ))
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex gap-2 pt-2 border-t border-outline-variant/30">
+                    {isMember ? (
                       <button
                         type="button"
-                        className="btn btn-outline btn-full"
                         onClick={() => void handleSair(g.id)}
+                        className="flex-1 min-h-[40px] rounded-xl bg-error-container text-on-error-container font-label-md font-bold"
                       >
                         Sair do Grupo
                       </button>
                     ) : (
                       <button
                         type="button"
-                        className="btn btn-primary btn-full"
-                        disabled={lotado}
+                        disabled={isFull}
                         onClick={() => void handleEntrar(g.id)}
+                        className="flex-1 min-h-[40px] rounded-xl bg-primary text-on-primary font-label-md font-bold disabled:opacity-40"
                       >
-                        {lotado ? 'Grupo Lotado' : 'Entrar no Grupo'}
+                        {isFull ? 'Grupo Cheio' : 'Entrar no Grupo'}
+                      </button>
+                    )}
+
+                    {isDelegadoOrSub && (
+                      <button
+                        type="button"
+                        onClick={() => void handleApagar(g.id)}
+                        className="w-10 h-10 rounded-xl bg-surface-container text-error flex items-center justify-center"
+                        title="Remover grupo"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">delete</span>
                       </button>
                     )}
                   </div>
-                )}
-              </article>
-            );
-          })}
-        </div>
-      )}
-
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Criar Grupos de Trabalho">
-        <form onSubmit={handleCriar} className="flex flex-col gap-3">
-          <label className="field">
-            <span className="field-label">Modo de Formação</span>
-            <select
-              className="select"
-              value={modo}
-              onChange={(e) => setModo(e.target.value as ModoGrupo)}
-            >
-              <option value="livre">Numerado com Tema e Limite de Vagas (Entrada Livre)</option>
-              <option value="alfabetico">Automático — Ordem Alfabética</option>
-              <option value="aleatorio">Automático — Aleatório</option>
-            </select>
-          </label>
-
-          <label className="field">
-            <span className="field-label">Disciplina (opcional)</span>
-            <input
-              className="input"
-              type="text"
-              placeholder="Ex: Engenharia de Software"
-              value={disciplina}
-              onChange={(e) => setDisciplina(e.target.value)}
-            />
-          </label>
-
-          {modo === 'livre' ? (
-            <>
-              <div className="grid-cards">
-                <label className="field">
-                  <span className="field-label">Nº de Grupos</span>
-                  <input
-                    className="input"
-                    type="number"
-                    min={1}
-                    max={30}
-                    required
-                    value={quantidadeGrupos}
-                    onChange={(e) => setQuantidadeGrupos(Number(e.target.value))}
-                  />
-                </label>
-
-                <label className="field">
-                  <span className="field-label">Máx. de Vagas / Grupo</span>
-                  <input
-                    className="input"
-                    type="number"
-                    min={1}
-                    max={50}
-                    required
-                    value={limiteVagas}
-                    onChange={(e) => setLimiteVagas(Number(e.target.value))}
-                  />
-                </label>
-              </div>
-
-              <label className="field">
-                <span className="field-label">Temas por grupo (1 por linha, opcional)</span>
-                <textarea
-                  className="textarea"
-                  placeholder={'Grupo 1: Arquitetura\nGrupo 2: Base de Dados\nGrupo 3: Frontend PWA'}
-                  value={temasText}
-                  onChange={(e) => setTemasText(e.target.value)}
-                />
-              </label>
-            </>
-          ) : (
-            <>
-              <label className="field">
-                <span className="field-label">Pessoas por Grupo</span>
-                <input
-                  className="input"
-                  type="number"
-                  min={2}
-                  max={20}
-                  required
-                  value={tamanhoGrupo}
-                  onChange={(e) => setTamanhoGrupo(Number(e.target.value))}
-                />
-              </label>
-              <label className="field">
-                <span className="field-label">Tema Base (opcional)</span>
-                <input
-                  className="input"
-                  type="text"
-                  placeholder="Ex: Seminário Final"
-                  value={temaBase}
-                  onChange={(e) => setTemaBase(e.target.value)}
-                />
-              </label>
-            </>
-          )}
-
-          <button type="submit" className="btn btn-primary mt-2" disabled={submitting}>
-            {submitting ? 'A gerar grupos...' : 'Gerar Grupos'}
-          </button>
-        </form>
-      </Modal>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </AppShell>
   );
 }

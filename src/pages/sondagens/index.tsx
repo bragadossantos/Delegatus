@@ -3,27 +3,25 @@ import { apiClient, ApiClientError } from '@/api/client';
 import type { SondagemComResultados } from '@/api/types';
 import { useAuth } from '@/components/context/AuthContext';
 import { AppShell } from '@/components/layout/AppShell';
-import { IconBarChart, IconCheck, IconPlus, IconTrash } from '@/components/ui/Icons';
-import { EmptyState, formatRelativeDate, Modal } from '@/components/ui/Primitives';
 
 export default function SondagensPage() {
   const { user, showToast } = useAuth();
   const [sondagens, setSondagens] = useState<SondagemComResultados[]>([]);
   const [loading, setLoading] = useState(true);
+  const [showCreate, setShowCreate] = useState(false);
 
-  const [createOpen, setCreateOpen] = useState(false);
   const [titulo, setTitulo] = useState('');
   const [descricao, setDescricao] = useState('');
-  const [opcoes, setOpcoes] = useState(['', '']);
+  const [opcoesText, setOpcoesText] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const isGestor = user?.papel === 'delegado' || user?.papel === 'subdelegado';
+  const isDelegadoOrSub = user?.papel === 'delegado' || user?.papel === 'subdelegado';
 
-  const loadSondagens = useCallback(async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await apiClient.sondagens.listar();
-      setSondagens(data.sondagens);
+      const res = await apiClient.sondagens.listar();
+      setSondagens(res.sondagens);
     } catch {
       // ignore
     } finally {
@@ -32,59 +30,32 @@ export default function SondagensPage() {
   }, []);
 
   useEffect(() => {
-    void loadSondagens();
-  }, [loadSondagens]);
-
-  const handleVotar = async (sondagemId: string, opcaoId: string) => {
-    try {
-      await apiClient.sondagens.votar(sondagemId, opcaoId);
-      await loadSondagens();
-      showToast('Voto registado!', 'success');
-    } catch (err) {
-      showToast(err instanceof ApiClientError ? err.message : 'Erro ao votar.', 'error');
-    }
-  };
-
-  const handleEncerrar = async (id: string) => {
-    try {
-      await apiClient.sondagens.encerrar(id);
-      await loadSondagens();
-      showToast('Sondagem encerrada.', 'success');
-    } catch (err) {
-      showToast(err instanceof ApiClientError ? err.message : 'Erro ao encerrar.', 'error');
-    }
-  };
-
-  const handleApagar = async (id: string) => {
-    try {
-      await apiClient.sondagens.apagar(id);
-      await loadSondagens();
-      showToast('Sondagem removida.', 'success');
-    } catch (err) {
-      showToast(err instanceof ApiClientError ? err.message : 'Erro ao apagar.', 'error');
-    }
-  };
+    void load();
+  }, [load]);
 
   const handleCriar = async (e: React.FormEvent) => {
     e.preventDefault();
-    const validOptions = opcoes.map((o) => o.trim()).filter(Boolean);
-    if (validOptions.length < 2) {
-      showToast('Adiciona pelo menos 2 opções.', 'error');
+    const opcoes = opcoesText
+      .split('\n')
+      .map((s) => s.trim())
+      .filter(Boolean);
+    if (opcoes.length < 2) {
+      showToast('Adiciona pelo menos 2 opções (1 por linha).', 'error');
       return;
     }
     setSubmitting(true);
     try {
       await apiClient.sondagens.criar({
         titulo,
-        descricao: descricao.trim() || undefined,
-        opcoes: validOptions,
+        descricao: descricao || undefined,
+        opcoes,
       });
       setTitulo('');
       setDescricao('');
-      setOpcoes(['', '']);
-      setCreateOpen(false);
-      await loadSondagens();
-      showToast('Sondagem criada!', 'success');
+      setOpcoesText('');
+      setShowCreate(false);
+      await load();
+      showToast('Sondagem criada e turma notificada!', 'success');
     } catch (err) {
       showToast(err instanceof ApiClientError ? err.message : 'Erro ao criar sondagem.', 'error');
     } finally {
@@ -92,209 +63,172 @@ export default function SondagensPage() {
     }
   };
 
+  const handleVotar = async (sondagemId: string, opcaoId: string) => {
+    try {
+      await apiClient.sondagens.votar(sondagemId, opcaoId);
+      await load();
+      showToast('Voto registado!', 'success');
+    } catch (err) {
+      showToast(err instanceof ApiClientError ? err.message : 'Erro ao votar.', 'error');
+    }
+  };
+
+  const handleEncerrar = async (sondagemId: string) => {
+    try {
+      await apiClient.sondagens.encerrar(sondagemId);
+      await load();
+      showToast('Sondagem encerrada.', 'info');
+    } catch (err) {
+      showToast(err instanceof ApiClientError ? err.message : 'Erro ao encerrar.', 'error');
+    }
+  };
+
   return (
-    <AppShell title="Sondagem">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-h1">Sondagens da Turma</h1>
-          <p className="text-sm text-secondary mt-1" style={{ margin: '4px 0 0' }}>
-            Votações rápidas para decisões da turma (1 voto por colega).
-          </p>
+    <AppShell title="Sondagens">
+      <div className="flex flex-col gap-space-lg">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-space-sm">
+          <div>
+            <h1 className="font-headline-lg-mobile md:font-headline-lg text-primary font-extrabold">
+              Sondagens &amp; Votações
+            </h1>
+            <p className="font-body-md text-on-surface-variant">
+              Decisões rápidas e democráticas para toda a turma (1 voto por colega).
+            </p>
+          </div>
+          {isDelegadoOrSub && (
+            <button
+              type="button"
+              onClick={() => setShowCreate((v) => !v)}
+              className="min-h-[44px] px-4 rounded-xl bg-primary text-on-primary font-label-md font-bold flex items-center gap-2 self-start"
+            >
+              <span className="material-symbols-outlined text-[20px]">{showCreate ? 'close' : 'poll'}</span>
+              <span>{showCreate ? 'Cancelar' : 'Nova Sondagem'}</span>
+            </button>
+          )}
         </div>
 
-        {isGestor && (
-          <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
-            <IconPlus size={18} />
-            Nova Sondagem
-          </button>
+        {showCreate && isDelegadoOrSub && (
+          <form
+            onSubmit={handleCriar}
+            className="bg-surface-container-lowest rounded-2xl p-space-md lg:p-space-lg shadow-sm flex flex-col gap-space-sm"
+          >
+            <h2 className="font-headline-sm font-bold text-on-surface">Criar Sondagem para a Turma</h2>
+            <input
+              required
+              value={titulo}
+              onChange={(e) => setTitulo(e.target.value)}
+              placeholder="Pergunta da sondagem (ex: Melhor dia para o teste de Álgebra?)"
+              className="w-full min-h-[44px] px-3.5 rounded-xl bg-surface-container-low"
+            />
+            <input
+              value={descricao}
+              onChange={(e) => setDescricao(e.target.value)}
+              placeholder="Contexto adicional (opcional)"
+              className="w-full min-h-[44px] px-3.5 rounded-xl bg-surface-container-low"
+            />
+            <textarea
+              required
+              rows={3}
+              value={opcoesText}
+              onChange={(e) => setOpcoesText(e.target.value)}
+              placeholder={'Opções (uma por linha):\nSegunda-feira\nQuarta-feira\nSexta-feira'}
+              className="w-full p-3.5 rounded-xl bg-surface-container-low"
+            />
+            <button
+              type="submit"
+              disabled={submitting}
+              className="min-h-[44px] px-5 rounded-xl bg-primary text-on-primary font-label-md font-bold self-start"
+            >
+              {submitting ? 'A publicar...' : 'Publicar Sondagem'}
+            </button>
+          </form>
         )}
-      </div>
 
-      {loading ? (
-        <div className="card text-sm text-muted">A carregar sondagens...</div>
-      ) : sondagens.length === 0 ? (
-        <EmptyState
-          icon={<IconBarChart size={24} />}
-          title="Sem sondagens ativas"
-          description="As votações criadas pelo delegado vão aparecer aqui."
-          action={
-            isGestor ? (
-              <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
-                <IconPlus size={18} />
-                Criar Sondagem
-              </button>
-            ) : undefined
-          }
-        />
-      ) : (
-        <div className="flex flex-col gap-4">
-          {sondagens.map((s) => {
-            const mostrarResultados = Boolean(s.meuVotoOpcaoId) || s.encerrada;
-            return (
-              <article key={s.id} className="card flex flex-col gap-3">
-                <div className="flex items-center justify-between flex-wrap gap-2">
-                  <div className="flex items-center gap-2">
-                    <span className={`badge ${s.encerrada ? 'badge-neutral' : 'badge-info'}`}>
-                      {s.encerrada ? 'Encerrada' : 'Aberta'}
+        {loading ? (
+          <div className="py-10 text-center text-on-surface-variant">A carregar sondagens...</div>
+        ) : sondagens.length === 0 ? (
+          <div className="bg-surface-container-lowest rounded-2xl p-space-xl text-center shadow-sm">
+            <span className="material-symbols-outlined text-[36px] text-secondary">how_to_vote</span>
+            <p className="font-headline-sm font-bold mt-2">Sem sondagens ativas</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-space-md">
+            {sondagens.map((s) => (
+              <div
+                key={s.id}
+                className="bg-surface-container-lowest rounded-2xl p-space-md lg:p-space-lg shadow-sm flex flex-col justify-between gap-space-sm"
+              >
+                <div>
+                  <div className="flex items-center justify-between gap-2 mb-2">
+                    <span
+                      className={`px-2.5 py-0.5 rounded-full font-label-sm font-bold ${
+                        !s.encerrada
+                          ? 'bg-secondary-container text-on-secondary-container'
+                          : 'bg-surface-container-high text-on-surface-variant'
+                      }`}
+                    >
+                      {!s.encerrada ? 'Votação Aberta' : 'Encerrada'}
                     </span>
-                    <span className="text-xs text-muted tabular-nums">
-                      {s.totalVotos} {s.totalVotos === 1 ? 'voto' : 'votos'} ·{' '}
-                      {formatRelativeDate(s.createdAt)}
+                    <span className="font-numeric-tabular text-xs text-on-surface-variant">
+                      {s.totalVotos} votos
                     </span>
                   </div>
 
-                  {isGestor && (
-                    <div className="flex items-center gap-1">
-                      {!s.encerrada && (
+                  <h3 className="font-headline-md text-on-surface font-bold">{s.titulo}</h3>
+                  {s.descricao && <p className="font-body-sm text-on-surface-variant mb-3">{s.descricao}</p>}
+
+                  <div className="flex flex-col gap-2 mt-2">
+                    {s.opcoes.map((o) => {
+                      const voted = s.meuVotoOpcaoId === o.id;
+                      return (
                         <button
+                          key={o.id}
                           type="button"
-                          className="btn btn-outline btn-sm"
-                          onClick={() => void handleEncerrar(s.id)}
+                          disabled={s.encerrada}
+                          onClick={() => void handleVotar(s.id, o.id)}
+                          className={`relative overflow-hidden text-left p-3 rounded-xl border transition-all min-h-[46px] ${
+                            voted
+                              ? 'border-primary bg-primary-fixed/30'
+                              : 'border-outline-variant/40 bg-surface-container-low hover:bg-surface-container'
+                          }`}
                         >
-                          Encerrar
-                        </button>
-                      )}
-                      <button
-                        type="button"
-                        className="btn btn-ghost btn-sm"
-                        aria-label="Apagar sondagem"
-                        onClick={() => void handleApagar(s.id)}
-                      >
-                        <IconTrash size={16} />
-                      </button>
-                    </div>
-                  )}
-                </div>
-
-                <div>
-                  <h2 className="text-h3">{s.titulo}</h2>
-                  {s.descricao && (
-                    <p className="text-sm text-secondary mt-1" style={{ margin: '4px 0 0' }}>
-                      {s.descricao}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex flex-col gap-2">
-                  {s.opcoes.map((opt) => {
-                    const isMine = s.meuVotoOpcaoId === opt.id;
-                    return (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        disabled={mostrarResultados}
-                        className="poll-option-btn"
-                        style={{
-                          borderColor: isMine ? 'var(--color-primary)' : undefined,
-                        }}
-                        onClick={() => void handleVotar(s.id, opt.id)}
-                      >
-                        {mostrarResultados && (
-                          <span
-                            className="poll-option-bar"
-                            style={{
-                              width: `${opt.percentagem}%`,
-                              backgroundColor: isMine
-                                ? 'var(--color-primary-soft)'
-                                : 'var(--bg-surface-muted)',
-                            }}
+                          <div
+                            className="absolute inset-y-0 left-0 bg-secondary-container/40 transition-all"
+                            style={{ width: `${o.percentagem}%` }}
                           />
-                        )}
-                        <span
-                          className="flex items-center gap-2"
-                          style={{ position: 'relative', zIndex: 1 }}
-                        >
-                          {isMine && <IconCheck size={16} />}
-                          <span>{opt.texto}</span>
-                        </span>
-                        {mostrarResultados && (
-                          <span
-                            className="font-mono text-sm font-semibold tabular-nums"
-                            style={{ position: 'relative', zIndex: 1 }}
-                          >
-                            {opt.percentagem}% ({opt.votosCount})
-                          </span>
-                        )}
-                      </button>
-                    );
-                  })}
+                          <div className="relative z-10 flex items-center justify-between gap-2">
+                            <span className="font-label-lg font-semibold text-on-surface flex items-center gap-2">
+                              {voted && (
+                                <span className="material-symbols-outlined text-primary text-[18px]">check_circle</span>
+                              )}
+                              {o.texto}
+                            </span>
+                            <span className="font-numeric-tabular text-xs font-bold text-primary">
+                              {o.percentagem}% ({o.votosCount})
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
                 </div>
-              </article>
-            );
-          })}
-        </div>
-      )}
 
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Nova Sondagem">
-        <form onSubmit={handleCriar} className="flex flex-col gap-3">
-          <label className="field">
-            <span className="field-label">Pergunta</span>
-            <input
-              className="input"
-              type="text"
-              required
-              placeholder="Ex: Melhor dia para o teste de Sistemas?"
-              value={titulo}
-              onChange={(e) => setTitulo(e.target.value)}
-            />
-          </label>
-
-          <label className="field">
-            <span className="field-label">Descrição (opcional)</span>
-            <input
-              className="input"
-              type="text"
-              placeholder="Detalhes adicionais..."
-              value={descricao}
-              onChange={(e) => setDescricao(e.target.value)}
-            />
-          </label>
-
-          <div className="flex flex-col gap-2">
-            <span className="field-label">Opções (2 a 6)</span>
-            {opcoes.map((opt, idx) => (
-              <div key={idx} className="flex items-center gap-2">
-                <input
-                  className="input"
-                  type="text"
-                  required
-                  placeholder={`Opção ${idx + 1}`}
-                  value={opt}
-                  onChange={(e) => {
-                    const next = [...opcoes];
-                    next[idx] = e.target.value;
-                    setOpcoes(next);
-                  }}
-                />
-                {opcoes.length > 2 && (
-                  <button
-                    type="button"
-                    className="btn btn-ghost"
-                    aria-label="Remover opção"
-                    onClick={() => setOpcoes(opcoes.filter((_, i) => i !== idx))}
-                  >
-                    <IconTrash size={16} />
-                  </button>
+                {isDelegadoOrSub && !s.encerrada && (
+                  <div className="pt-2 border-t border-outline-variant/30 flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => void handleEncerrar(s.id)}
+                      className="px-3 min-h-[36px] rounded-lg bg-error-container/70 text-on-error-container font-label-sm font-bold"
+                    >
+                      Encerrar Votação
+                    </button>
+                  </div>
                 )}
               </div>
             ))}
-            {opcoes.length < 6 && (
-              <button
-                type="button"
-                className="btn btn-outline btn-sm"
-                onClick={() => setOpcoes([...opcoes, ''])}
-              >
-                <IconPlus size={16} />
-                Adicionar Opção
-              </button>
-            )}
           </div>
-
-          <button type="submit" className="btn btn-primary mt-2" disabled={submitting}>
-            {submitting ? 'A criar...' : 'Publicar Sondagem'}
-          </button>
-        </form>
-      </Modal>
+        )}
+      </div>
     </AppShell>
   );
 }

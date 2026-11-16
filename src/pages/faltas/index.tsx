@@ -3,8 +3,6 @@ import { apiClient, ApiClientError } from '@/api/client';
 import type { Falta, MotivoFalta, StatusFalta } from '@/api/types';
 import { useAuth } from '@/components/context/AuthContext';
 import { AppShell } from '@/components/layout/AppShell';
-import { IconCalendarOff, IconCheck, IconPlus } from '@/components/ui/Icons';
-import { EmptyState, formatRelativeDate, Modal } from '@/components/ui/Primitives';
 
 const MOTIVO_LABEL: Record<MotivoFalta, string> = {
   doenca: 'Doença',
@@ -12,55 +10,49 @@ const MOTIVO_LABEL: Record<MotivoFalta, string> = {
   outro: 'Outro',
 };
 
+const STATUS_BADGE: Record<StatusFalta, { label: string; cls: string }> = {
+  pendente: { label: 'Pendente', cls: 'bg-error-container text-on-error-container' },
+  visto: { label: 'Visto pelo Delegado', cls: 'bg-secondary-container text-on-secondary-container' },
+};
+
 export default function FaltasPage() {
   const { user, showToast } = useAuth();
   const [faltas, setFaltas] = useState<Falta[]>([]);
   const [loading, setLoading] = useState(true);
-  const [statusFiltro, setStatusFiltro] = useState<'todas' | StatusFalta>('todas');
-  const [motivoFiltro, setMotivoFiltro] = useState<'todos' | MotivoFalta>('todos');
+  const [filtro, setFiltro] = useState<'todas' | StatusFalta>('todas');
 
-  const [createOpen, setCreateOpen] = useState(false);
-  const [dataFalta, setDataFalta] = useState(() => new Date().toISOString().slice(0, 10));
+  const [data, setData] = useState(() => new Date().toISOString().slice(0, 10));
   const [disciplina, setDisciplina] = useState('');
   const [motivo, setMotivo] = useState<MotivoFalta>('doenca');
   const [descricao, setDescricao] = useState('');
   const [submitting, setSubmitting] = useState(false);
 
-  const isGestor = user?.papel === 'delegado' || user?.papel === 'subdelegado';
+  const isDelegadoOrSub = user?.papel === 'delegado' || user?.papel === 'subdelegado';
 
-  const loadFaltas = useCallback(async () => {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
-      const data = await apiClient.faltas.listar({
-        status: statusFiltro === 'todas' ? undefined : statusFiltro,
-        motivo: motivoFiltro === 'todos' ? undefined : motivoFiltro,
-      });
-      setFaltas(data.faltas);
+      const res = await apiClient.faltas.listar();
+      setFaltas(res.faltas);
     } catch {
       // ignore
     } finally {
       setLoading(false);
     }
-  }, [statusFiltro, motivoFiltro]);
+  }, []);
 
   useEffect(() => {
-    void loadFaltas();
-  }, [loadFaltas]);
+    void load();
+  }, [load]);
 
-  const handleRegistarFalta = async (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitting(true);
     try {
-      await apiClient.faltas.registar({
-        data: dataFalta,
-        disciplina,
-        motivo,
-        descricao,
-      });
+      await apiClient.faltas.registar({ data, disciplina, motivo, descricao });
       setDisciplina('');
       setDescricao('');
-      setCreateOpen(false);
-      await loadFaltas();
+      await load();
       showToast('Aviso de falta enviado ao delegado!', 'success');
     } catch (err) {
       showToast(err instanceof ApiClientError ? err.message : 'Erro ao registar falta.', 'error');
@@ -72,185 +64,140 @@ export default function FaltasPage() {
   const handleMarcarVista = async (id: string) => {
     try {
       await apiClient.faltas.marcarVista(id);
-      await loadFaltas();
+      await load();
       showToast('Falta marcada como vista.', 'success');
     } catch (err) {
-      showToast(err instanceof ApiClientError ? err.message : 'Erro ao atualizar falta.', 'error');
+      showToast(err instanceof ApiClientError ? err.message : 'Erro ao atualizar.', 'error');
     }
   };
 
+  const filtered = filtro === 'todas' ? faltas : faltas.filter((f) => f.status === filtro);
+
   return (
     <AppShell title="Faltas">
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="flex flex-col gap-space-lg">
         <div>
-          <h1 className="text-h1">Avisos de Falta</h1>
-          <p className="text-sm text-secondary mt-1" style={{ margin: '4px 0 0' }}>
-            {isGestor
-              ? 'Revê os avisos de falta dos colegas durante ou no fim do dia.'
-              : 'Envia o teu aviso de falta para o delegado justificar junto dos professores.'}
+          <h1 className="font-headline-lg-mobile md:font-headline-lg text-primary font-extrabold">
+            Gestão de Faltas
+          </h1>
+          <p className="font-body-md text-on-surface-variant">
+            {isDelegadoOrSub
+              ? 'Revê durante ou no fim do dia os avisos de falta enviados pelos colegas.'
+              : 'Avisa o delegado caso não possas comparecer por motivo de doença, trabalho ou outro.'}
           </p>
         </div>
 
-        <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
-          <IconPlus size={18} />
-          Registar Falta
-        </button>
-      </div>
-
-      {/* Filters */}
-      <div className="flex items-center justify-between flex-wrap gap-2">
-        <div className="tabs-scroll">
-          <button
-            type="button"
-            className={`tab-pill ${statusFiltro === 'todas' ? 'active' : ''}`}
-            onClick={() => setStatusFiltro('todas')}
-          >
-            Todas
-          </button>
-          <button
-            type="button"
-            className={`tab-pill ${statusFiltro === 'pendente' ? 'active' : ''}`}
-            onClick={() => setStatusFiltro('pendente')}
-          >
-            Pendentes
-          </button>
-          <button
-            type="button"
-            className={`tab-pill ${statusFiltro === 'visto' ? 'active' : ''}`}
-            onClick={() => setStatusFiltro('visto')}
-          >
-            Vistas
-          </button>
-        </div>
-
-        <select
-          className="select"
-          style={{ width: 'auto', minWidth: 160 }}
-          value={motivoFiltro}
-          onChange={(e) => setMotivoFiltro(e.target.value as 'todos' | MotivoFalta)}
-          aria-label="Filtrar por motivo"
+        <form
+          onSubmit={handleSubmit}
+          className="bg-surface-container-lowest rounded-2xl p-space-md lg:p-space-lg shadow-sm flex flex-col gap-space-sm"
         >
-          <option value="todos">Todos os motivos</option>
-          <option value="doenca">Doença</option>
-          <option value="trabalho">Trabalho</option>
-          <option value="outro">Outro</option>
-        </select>
-      </div>
-
-      {loading ? (
-        <div className="card text-sm text-muted">A carregar faltas...</div>
-      ) : faltas.length === 0 ? (
-        <EmptyState
-          icon={<IconCalendarOff size={24} />}
-          title="Sem avisos de falta"
-          description="Nenhum registo encontrado com os filtros atuais."
-          action={
-            <button type="button" className="btn btn-primary" onClick={() => setCreateOpen(true)}>
-              <IconPlus size={18} />
-              Enviar Aviso de Falta
-            </button>
-          }
-        />
-      ) : (
-        <div className="flex flex-col gap-3">
-          {faltas.map((f) => (
-            <article key={f.id} className="card flex flex-col gap-2">
-              <div className="flex items-center justify-between flex-wrap gap-2">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-semibold">{f.alunoNome}</span>
-                  <span className="badge badge-neutral">{MOTIVO_LABEL[f.motivo]}</span>
-                  <span
-                    className={`badge ${
-                      f.status === 'visto' ? 'badge-success' : 'badge-warning'
-                    }`}
-                  >
-                    {f.status === 'visto' ? 'Visto' : 'Pendente'}
-                  </span>
-                </div>
-                <span className="font-mono text-xs text-muted">{f.data}</span>
-              </div>
-
-              <div className="text-sm font-semibold">{f.disciplina}</div>
-              <p className="text-sm text-secondary" style={{ margin: 0 }}>
-                {f.descricao}
-              </p>
-
-              <div className="flex items-center justify-between flex-wrap gap-2 mt-1">
-                <span className="text-xs text-muted">
-                  Enviado {formatRelativeDate(f.createdAt)}
-                  {f.vistoPorNome ? ` · Visto por ${f.vistoPorNome}` : ''}
-                </span>
-
-                {isGestor && f.status === 'pendente' && (
-                  <button
-                    type="button"
-                    className="btn btn-secondary btn-sm"
-                    onClick={() => void handleMarcarVista(f.id)}
-                  >
-                    <IconCheck size={16} />
-                    Marcar como visto
-                  </button>
-                )}
-              </div>
-            </article>
-          ))}
-        </div>
-      )}
-
-      <Modal open={createOpen} onClose={() => setCreateOpen(false)} title="Registar Aviso de Falta">
-        <form onSubmit={handleRegistarFalta} className="flex flex-col gap-3">
-          <label className="field">
-            <span className="field-label">Data da Falta</span>
+          <h2 className="font-headline-sm font-bold text-on-surface">Comunicar Falta ao Delegado</h2>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-space-sm">
             <input
-              className="input"
               type="date"
               required
-              value={dataFalta}
-              onChange={(e) => setDataFalta(e.target.value)}
+              value={data}
+              onChange={(e) => setData(e.target.value)}
+              className="min-h-[44px] px-3.5 rounded-xl bg-surface-container-low"
             />
-          </label>
-
-          <label className="field">
-            <span className="field-label">Disciplina / Aula</span>
             <input
-              className="input"
-              type="text"
               required
-              placeholder="Ex: Algoritmos e Estruturas de Dados"
               value={disciplina}
               onChange={(e) => setDisciplina(e.target.value)}
+              placeholder="Disciplina / Aula"
+              className="min-h-[44px] px-3.5 rounded-xl bg-surface-container-low"
             />
-          </label>
-
-          <label className="field">
-            <span className="field-label">Motivo</span>
             <select
-              className="select"
               value={motivo}
               onChange={(e) => setMotivo(e.target.value as MotivoFalta)}
+              className="min-h-[44px] px-3.5 rounded-xl bg-surface-container-low"
             >
-              <option value="doenca">Doença / Consulta Médica</option>
-              <option value="trabalho">Trabalho / Estágio</option>
-              <option value="outro">Outro Motivo</option>
+              <option value="doenca">Doença</option>
+              <option value="trabalho">Trabalho</option>
+              <option value="outro">Outro</option>
             </select>
-          </label>
-
-          <label className="field">
-            <span className="field-label">Descrição / Justificação</span>
-            <textarea
-              className="textarea"
-              required
-              placeholder="Explica brevemente o motivo para o delegado..."
-              value={descricao}
-              onChange={(e) => setDescricao(e.target.value)}
-            />
-          </label>
-
-          <button type="submit" className="btn btn-primary mt-1" disabled={submitting}>
+          </div>
+          <textarea
+            required
+            rows={2}
+            value={descricao}
+            onChange={(e) => setDescricao(e.target.value)}
+            placeholder="Descreve brevemente o motivo (ex: consulta médica, turno no trabalho...)"
+            className="w-full p-3.5 rounded-xl bg-surface-container-low"
+          />
+          <button
+            type="submit"
+            disabled={submitting}
+            className="min-h-[44px] px-5 rounded-xl bg-primary text-on-primary font-label-md font-bold self-start"
+          >
             {submitting ? 'A enviar...' : 'Enviar Aviso de Falta'}
           </button>
         </form>
-      </Modal>
+
+        <div className="flex flex-wrap gap-2">
+          {(['todas', 'pendente', 'visto'] as const).map((tab) => (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => setFiltro(tab)}
+              className={`min-h-[38px] px-4 rounded-full font-label-md font-semibold transition-colors ${
+                filtro === tab
+                  ? 'bg-primary text-on-primary'
+                  : 'bg-surface-container-lowest text-on-surface-variant hover:bg-surface-container'
+              }`}
+            >
+              {tab === 'todas' ? 'Todas' : STATUS_BADGE[tab].label}
+            </button>
+          ))}
+        </div>
+
+        {loading ? (
+          <div className="py-10 text-center text-on-surface-variant">A carregar faltas...</div>
+        ) : filtered.length === 0 ? (
+          <div className="bg-surface-container-lowest rounded-2xl p-space-xl text-center shadow-sm">
+            <span className="material-symbols-outlined text-[36px] text-secondary">event_available</span>
+            <p className="font-headline-sm font-bold mt-2">Sem registos neste filtro</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-space-md">
+            {filtered.map((f) => {
+              const st = STATUS_BADGE[f.status];
+              return (
+                <div
+                  key={f.id}
+                  className="bg-surface-container-lowest rounded-2xl p-space-md shadow-sm flex flex-col justify-between gap-space-sm"
+                >
+                  <div>
+                    <div className="flex items-center justify-between gap-2 mb-1">
+                      <span className={`px-2.5 py-0.5 rounded-full font-label-sm font-bold ${st.cls}`}>
+                        {st.label}
+                      </span>
+                      <span className="font-numeric-tabular text-xs text-on-surface-variant">{f.data}</span>
+                    </div>
+                    <h3 className="font-headline-sm font-bold text-on-surface">{f.alunoNome}</h3>
+                    <p className="font-label-md text-secondary font-semibold">
+                      {f.disciplina} • {MOTIVO_LABEL[f.motivo]}
+                    </p>
+                    <p className="font-body-md text-on-surface-variant mt-1">{f.descricao}</p>
+                  </div>
+
+                  {isDelegadoOrSub && f.status === 'pendente' && (
+                    <div className="flex gap-2 pt-2 border-t border-outline-variant/30">
+                      <button
+                        type="button"
+                        onClick={() => void handleMarcarVista(f.id)}
+                        className="flex-1 min-h-[38px] rounded-lg bg-secondary-container text-on-secondary-container font-label-sm font-bold"
+                      >
+                        Marcar como Visto
+                      </button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
     </AppShell>
   );
 }
